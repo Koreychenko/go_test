@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"sync"
 )
@@ -10,11 +9,7 @@ func SafeGo(task func()) {
 	go func() {
 		defer func() {
 			if err := recover(); err != nil {
-				if recoverError, ok := err.(error); ok {
-					slog.Error(fmt.Sprintf("panic: %s", recoverError.Error()))
-				} else {
-					slog.Error(fmt.Sprintf("panic: %s", err))
-				}
+				slog.Error("panic recovered", slog.Any("error", err))
 			}
 		}()
 
@@ -38,6 +33,8 @@ func main() {
 			print(i)
 		}
 	})
+
+	SafeGo(nil)
 
 	wg.Wait()
 }
