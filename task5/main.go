@@ -5,12 +5,12 @@ import (
 	"strconv"
 )
 
-type Str struct {
+type MyStruct struct {
 	Field string
 }
 
 func Map[T any, R any](input []T, mapper func(T) R) []R {
-	var output []R
+	output := make([]R, 0, len(input))
 	for _, val := range input {
 		output = append(output, mapper(val))
 	}
@@ -26,14 +26,14 @@ func main() {
 		},
 	)
 
-	fmt.Printf("%v", intsToStrings)
+	fmt.Println(intsToStrings)
 
-	extractFields := Map[Str, string](
-		[]Str{{"one"}, {"two"}, {"three"}},
-		func(i Str) string {
+	extractFields := Map[MyStruct, string](
+		[]MyStruct{{"one"}, {"two"}, {"three"}},
+		func(i MyStruct) string {
 			return i.Field
 		},
 	)
 
-	fmt.Printf("%v", extractFields)
+	fmt.Println(extractFields)
 }
