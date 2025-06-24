@@ -1,10 +1,13 @@
 package user
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"github.com/go-playground/validator/v10"
 	"io"
 	"main/internal/infra/db"
+	"main/internal/webserver"
 	"net/http"
 	"strconv"
 )
@@ -14,26 +17,19 @@ type Webserver interface {
 }
 
 type CreateUserProcessorInterface interface {
-	CreateUser(request CreateUserRequest) error
+	CreateUser(ctx context.Context, request CreateUserRequest) error
 }
 
 type UpdateUserProcessorInterface interface {
-	UpdateUser(userId int, request UpdateUserRequest) error
+	UpdateUser(ctx context.Context, userId int, request UpdateUserRequest) error
 }
 
 type DeleteUserProcessorInterface interface {
-	DeleteUser(userId int) error
+	DeleteUser(ctx context.Context, userId int) error
 }
 
 type GetUserProcessorInterface interface {
-	GetUser(userId int) (*User, error)
-}
-
-type UserRepositoryInterface interface {
-	Get(userId int) (*User, error)
-	Delete(userId int) error
-	Create(user *User) error
-	Update(user *User) error
+	GetUser(ctx context.Context, userId int) (*User, error)
 }
 
 func RegisterHandlers(srv Webserver) {
@@ -41,10 +37,10 @@ func RegisterHandlers(srv Webserver) {
 	repository := NewRepository(connection)
 	userProcessor := NewUserProcessor(repository)
 
-	srv.RegisterHandler("POST /user", createUserHandler(userProcessor))
-	srv.RegisterHandler("PUT /user/{id}", updateUserHandler(userProcessor))
-	srv.RegisterHandler("GET /user/{id}", getUserHandler(userProcessor))
-	srv.RegisterHandler("DELETE /user/{id}", deleteUserHandler(userProcessor))
+	srv.RegisterHandler("POST /user", webserver.WrapHandler(createUserHandler(userProcessor)))
+	srv.RegisterHandler("PUT /user/{id}", webserver.WrapHandler(updateUserHandler(userProcessor)))
+	srv.RegisterHandler("GET /user/{id}", webserver.WrapHandler(getUserHandler(userProcessor)))
+	srv.RegisterHandler("DELETE /user/{id}", webserver.WrapHandler(deleteUserHandler(userProcessor)))
 }
 
 // @Summary      Create a new user
@@ -56,27 +52,23 @@ func RegisterHandlers(srv Webserver) {
 // @Failure      400
 // @Failure      500
 // @Router       /user [post]
-func createUserHandler(createUserProcessor CreateUserProcessorInterface) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
+func createUserHandler(createUserProcessor CreateUserProcessorInterface) func(*http.Request) ([]byte, error) {
+	return func(request *http.Request) ([]byte, error) {
 		var createUserRequest CreateUserRequest
 
 		err := decodeAndValidate[CreateUserRequest](request, &createUserRequest)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-
-			return
+			return nil, err
 		}
 
-		err = createUserProcessor.CreateUser(createUserRequest)
+		err = createUserProcessor.CreateUser(request.Context(), createUserRequest)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
-
-			return
+			return nil, err
 		}
 
-		writer.WriteHeader(http.StatusCreated)
+		return nil, nil
 	}
 }
 
@@ -90,14 +82,12 @@ func createUserHandler(createUserProcessor CreateUserProcessorInterface) func(ht
 // @Failure      400
 // @Failure      500
 // @Router       /user/{id} [put]
-func updateUserHandler(updateUserProcessor UpdateUserProcessorInterface) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
+func updateUserHandler(updateUserProcessor UpdateUserProcessorInterface) func(*http.Request) ([]byte, error) {
+	return func(request *http.Request) ([]byte, error) {
 		userId, err := strconv.Atoi(request.PathValue("id"))
 
 		if err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-
-			return
+			return nil, webserver.NewInvalidRequestError(err)
 		}
 
 		var updateUserRequest UpdateUserRequest
@@ -105,20 +95,20 @@ func updateUserHandler(updateUserProcessor UpdateUserProcessorInterface) func(ht
 		err = decodeAndValidate[UpdateUserRequest](request, &updateUserRequest)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-
-			return
+			return nil, err
 		}
 
-		err = updateUserProcessor.UpdateUser(userId, updateUserRequest)
+		err = updateUserProcessor.UpdateUser(request.Context(), userId, updateUserRequest)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
+			if errors.Is(err, &UserNotFoundError{}) {
+				return nil, webserver.NewNotFoundError(err)
+			}
 
-			return
+			return nil, err
 		}
 
-		writer.WriteHeader(http.StatusOK)
+		return nil, nil
 	}
 }
 
@@ -132,41 +122,31 @@ func updateUserHandler(updateUserProcessor UpdateUserProcessorInterface) func(ht
 // @Failure      404
 // @Failure      500
 // @Router       /user/{id} [get]
-func getUserHandler(userProcessor GetUserProcessorInterface) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
+func getUserHandler(userProcessor GetUserProcessorInterface) func(*http.Request) ([]byte, error) {
+	return func(request *http.Request) ([]byte, error) {
 		userId, err := strconv.Atoi(request.PathValue("id"))
 
 		if err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-
-			return
+			return nil, webserver.NewInvalidRequestError(err)
 		}
 
-		user, err := userProcessor.GetUser(userId)
+		user, err := userProcessor.GetUser(request.Context(), userId)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
+			if errors.Is(err, &UserNotFoundError{}) {
+				return nil, webserver.NewNotFoundError(err)
+			}
 
-			return
-		}
-
-		if user == nil {
-			writer.WriteHeader(http.StatusNotFound)
-
-			return
+			return nil, err
 		}
 
 		encodedUser, err := json.Marshal(user)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
-
-			return
+			return nil, err
 		}
 
-		writer.WriteHeader(http.StatusOK)
-		writer.Header().Set("Content-Type", "application/json")
-		writer.Write(encodedUser)
+		return encodedUser, nil
 	}
 }
 
@@ -178,25 +158,21 @@ func getUserHandler(userProcessor GetUserProcessorInterface) func(http.ResponseW
 // @Failure      400
 // @Failure      500
 // @Router       /user/{id} [delete]
-func deleteUserHandler(userProcessor DeleteUserProcessorInterface) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, request *http.Request) {
+func deleteUserHandler(userProcessor DeleteUserProcessorInterface) func(*http.Request) ([]byte, error) {
+	return func(request *http.Request) ([]byte, error) {
 		userId, err := strconv.Atoi(request.PathValue("id"))
 
 		if err != nil {
-			writer.WriteHeader(http.StatusBadRequest)
-
-			return
+			return nil, webserver.NewInvalidRequestError(err)
 		}
 
-		err = userProcessor.DeleteUser(userId)
+		err = userProcessor.DeleteUser(request.Context(), userId)
 
 		if err != nil {
-			writer.WriteHeader(http.StatusInternalServerError)
-
-			return
+			return nil, err
 		}
 
-		writer.WriteHeader(http.StatusOK)
+		return nil, nil
 	}
 }
 
@@ -210,14 +186,14 @@ func decodeAndValidate[T any](request *http.Request, dest *T) error {
 	err = json.Unmarshal(bodyValue, &dest)
 
 	if err != nil {
-		return nil
+		return webserver.NewInvalidRequestError(err)
 	}
 
 	vld := validator.New()
 	err = vld.Struct(dest)
 
 	if err != nil {
-		return err
+		return webserver.NewValidationError(err)
 	}
 
 	return nil

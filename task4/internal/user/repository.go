@@ -1,15 +1,18 @@
 package user
 
-import "database/sql"
+import (
+	"context"
+	"database/sql"
+)
 
 type Repository struct {
 	db *sql.DB
 }
 
-func (r *Repository) Get(userId int) (*User, error) {
+func (r *Repository) Get(ctx context.Context, userId int) (*User, error) {
 	var user User
 
-	rows, err := r.db.Query("SELECT id, first_name, last_name FROM user WHERE id = ?", userId)
+	rows, err := r.db.QueryContext(ctx, "SELECT id, first_name, last_name FROM user WHERE id = ?", userId)
 
 	if err != nil {
 		return nil, err
@@ -24,14 +27,14 @@ func (r *Repository) Get(userId int) (*User, error) {
 			return nil, err
 		}
 	} else {
-		return nil, sql.ErrNoRows
+		return nil, nil
 	}
 
 	return &user, nil
 }
 
-func (r *Repository) Delete(userId int) error {
-	_, err := r.db.Exec("DELETE FROM user WHERE id = ?", userId)
+func (r *Repository) Delete(ctx context.Context, userId int) error {
+	_, err := r.db.ExecContext(ctx, "DELETE FROM user WHERE id = ?", userId)
 
 	if err != nil {
 		return err
@@ -40,10 +43,10 @@ func (r *Repository) Delete(userId int) error {
 	return nil
 }
 
-func (r *Repository) Create(user *User) error {
+func (r *Repository) Create(ctx context.Context, user *User) error {
 	var err error
 
-	result, err := r.db.Exec("INSERT INTO user (first_name, last_name) VALUES (?, ?)", user.FirstName, user.LastName)
+	result, err := r.db.ExecContext(ctx, "INSERT INTO user (first_name, last_name) VALUES (?, ?)", user.FirstName, user.LastName)
 
 	if err != nil {
 		return err
@@ -60,10 +63,10 @@ func (r *Repository) Create(user *User) error {
 	return nil
 }
 
-func (r *Repository) Update(user *User) error {
+func (r *Repository) Update(ctx context.Context, user *User) error {
 	var err error
 
-	_, err = r.db.Exec("UPDATE user SET first_name = ?, last_name = ?) WHERE id = ?", user.FirstName, user.LastName, user.ID)
+	_, err = r.db.ExecContext(ctx, "UPDATE user SET first_name = ?, last_name = ?) WHERE id = ?", user.FirstName, user.LastName, user.ID)
 
 	if err != nil {
 		return err

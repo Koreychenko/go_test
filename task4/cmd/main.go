@@ -1,8 +1,8 @@
 package main
 
 import (
-	"fmt"
 	httpSwagger "github.com/swaggo/http-swagger"
+	"log/slog"
 	"main/internal/user"
 	"main/internal/webserver"
 	"os"
@@ -28,6 +28,8 @@ const address = ":9993"
 // @externalDocs.description  OpenAPI
 // @externalDocs.url          https://swagger.io/resources/open-api/
 func main() {
+	initLogger()
+
 	srv := webserver.NewWebserver(address)
 
 	user.RegisterHandlers(srv)
@@ -39,8 +41,14 @@ func main() {
 	err := srv.Start()
 
 	if err != nil {
-		fmt.Printf("Error %v", err)
+		slog.Error("Unable to start server", "err", err.Error())
 
 		os.Exit(1)
 	}
+
+	slog.Info("Server started")
+}
+
+func initLogger() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})))
 }
